@@ -63,7 +63,6 @@ public class MoveGenerator {
         Piece dest = board.getPiece(move.newCol, move.newRow);
         if (dest != null && dest.isWhite == piece.isWhite) return false;
 
-        // TODO: handle en-passant, promotions
         return true;
     }
 
