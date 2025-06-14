@@ -11,8 +11,8 @@ import pieces.King;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.MouseAdapter;
 import java.util.ArrayList;
+import java.util.List;
 
 public class Board extends JPanel {
     public int tilesize = 80;
@@ -26,6 +26,9 @@ public class Board extends JPanel {
     public int enPassantTile = -1;
 
     Input input = new Input(this);
+    private MoveGenerator moveGen;
+    private CheckScanner scanner;
+    private boolean whiteTurn = true;
 
     public Board() {
         this.setPreferredSize(new Dimension(cols * tilesize, rows * tilesize));
@@ -35,11 +38,22 @@ public class Board extends JPanel {
         this.addMouseMotionListener(input);
 
         addPieces();
+        this.moveGen = new MoveGenerator(this);
+        this.scanner = new CheckScanner(this);
     }
 
     public Piece getPiece(int col, int row) {
         for (Piece piece : pieceList) {
             if (piece.col == col && piece.row == row) {
+                return piece;
+            }
+        }
+        return null;
+    }
+
+    Piece findKing(boolean isWhite) {
+        for (Piece piece : pieceList) {
+            if (isWhite == piece.isWhite && piece.name.equals("King")) {
                 return piece;
             }
         }
@@ -87,17 +101,74 @@ public class Board extends JPanel {
     }
 
     public void makeMove(Move move) {
+        // castling: if king moves two squares
+        if (move.piece instanceof King && Math.abs(move.newCol - move.oldCol) == 2) {
+            int dir = move.newCol - move.oldCol > 0 ? 1 : -1;
+            int rookStart = dir > 0 ? 7 : 0;
+            Rook rook = (Rook) getPiece(rookStart, move.oldRow);
+            // move king
+            move.piece.col = move.newCol;
+            move.piece.row = move.newRow;
+            move.piece.xPos = move.newCol * tilesize;
+            move.piece.yPos = move.newRow * tilesize;
+            move.piece.isFirstMove = false;
+            // move rook next to king
+            rook.col = move.newCol - dir;
+            rook.row = move.oldRow;
+            rook.xPos = rook.col * tilesize;
+            rook.yPos = rook.row * tilesize;
+            rook.isFirstMove = false;
+            enPassantTile = -1;
+            return;
+        }
+
         if (move.piece.name.equals("Pawn")) {
             movePawn(move);
         } else {
             // non-pawn moves
-            move.piece.col       = move.newCol;
-            move.piece.row       = move.newRow;
-            move.piece.xPos      = move.newCol * tilesize;
-            move.piece.yPos      = move.newRow * tilesize;
+            move.piece.col = move.newCol;
+            move.piece.row = move.newRow;
+            move.piece.xPos = move.newCol * tilesize;
+            move.piece.yPos = move.newRow * tilesize;
             move.piece.isFirstMove = false;
             capture(move);
         }
+        postMove();
+    }
+
+    private void postMove() {
+        // switch turn and check for checkmate/stalemate
+        whiteTurn = !whiteTurn;
+        detectGameOver();
+    }
+
+    private void detectGameOver() {
+        // generate legal moves for side to move
+        List<Move> legal = moveGen.generateAllLegalMoves(whiteTurn);
+        if (legal.isEmpty()) {
+            // determine if in check
+            Piece king = findKing(whiteTurn);
+            boolean inCheck = king != null && scanner.isSquareAttacked(king.col, king.row, !whiteTurn);
+            String msg;
+            if (inCheck) {
+                msg = whiteTurn ? "Checkmate! Black wins." : "Checkmate! White wins.";
+            } else {
+                msg = "Stalemate!";
+            }
+            JOptionPane.showMessageDialog(this, msg);
+            resetGame();
+        }
+    }
+
+    /**
+     * Clear and set up pieces for a new game.
+     */
+    private void resetGame() {
+        pieceList.clear();
+        addPieces();
+        whiteTurn = true;
+        enPassantTile = -1;
+        repaint();
     }
 
     public void capture(Move move) {
@@ -105,19 +176,9 @@ public class Board extends JPanel {
     }
 
     public boolean isValidMove(Move move) {
-        if (sameTeam(move.piece, move.capture)) {
-            return false;
-        }
-
-        if (!move.piece.isValidMovement(move.newCol, move.newRow)) {
-            return false;
-        }
-
-        if (move.piece.moveCollidesWithPiece(move.newCol, move.newRow)) {
-            return false;
-        }
-
-        return true;
+        // enforce turn
+        if (move.piece.isWhite != whiteTurn) return false;
+        return moveGen.isLegalMove(move);
     }
 
     private boolean sameTeam(Piece p1, Piece p2) {
